@@ -35,8 +35,8 @@ void exp_gadm_info()   {
     GA_hdf ga(state.nv);
     ga.randomize();
 
-    for(unsigned x = 0; x < ga.num_nodes(); x++)
-        printf("INITIAL %d %f\n", x, ga.node(x)->obj);
+//    for(unsigned x = 0; x < ga.num_nodes(); x++)
+//        printf("INITIAL %d %f\n", x, ga.node(x)->obj);
 
     // process the data
     map<int,int> contacts;
