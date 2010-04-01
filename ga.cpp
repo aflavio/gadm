@@ -31,69 +31,6 @@
 using namespace std;
 
 //
-// Constructors, overloaded operators, and destructors
-//
-GA_NODE::GA_NODE(unsigned length)  {
-    b   = new char[length];
-    len = length;
-    improvements = 0;
-    contacts     = 0;
-    obj          = DBL_MIN;
-}
-GA_NODE::GA_NODE(GA_NODE &o)  {
-    improvements = o.improvements;
-    contacts     = o.contacts;
-    len          = o.len;
-    b = new char[o.len];
-    memcpy(b, o.b, len);
-}
-GA_NODE &GA_NODE::operator=(const GA_NODE&o)  {
-    if(this != &o)  {
-        if(len != o.len)    {
-            delete[] b;
-            b = new char[o.len];
-            len = o.len;
-        }
-        improvements = o.improvements;
-        contacts     = o.contacts;
-        obj          = o.obj;
-        memcpy(b, o.b, len);
-    }
-    return *this;
-}
-GA_NODE::~GA_NODE() {
-    delete[] b;
-}
-SCHEMA::SCHEMA(unsigned len)    {
-    b = new char[len];
-    length = len;
-}
-SCHEMA::~SCHEMA()   {
-    delete[] b;
-}
-GA_hdf::GA_hdf(unsigned num_inds, int len)	{
-	// setup
-	nv = num_inds;
-	hdf_len = UINT_MAX;
-	pop = new GA_NODE* [nv];
-	for(unsigned i = 0; i < nv; i++)
-        pop[i] = NULL;
-
-	// generate the HDF fitness function
-	hdf_generate(len);
-}
-GA_hdf::~GA_hdf()	{
-    for(unsigned i = 0; i < nv; i++)
-        if(pop[i])
-            delete pop[i];
-	delete[] pop;
-	for(unsigned i = 0; i < hdf_schema.size(); i++)
-        delete hdf_schema[i];
-    hdf_schema.clear();
-}
-
-
-//
 // Generate a new random HDF of a specified length
 // If len == -1, then len is chosen randomly from [256,1024]
 //
@@ -109,7 +46,6 @@ void GA_hdf::hdf_generate(int len)	{
             pop[i] = new GA_NODE(hdf_len);
         }
     }
-//    printf("# Generating HDF of length %u: ", hdf_len);
 
     // delete all the old schema
     for(unsigned i = 0; i < hdf_schema.size(); i++)
@@ -128,7 +64,6 @@ void GA_hdf::hdf_generate(int len)	{
 			s->b[l] = rng.genrand_real2() * 3;  // 0, 1 and 2 for the wildcard
 		hdf_schema.push_back(s);
 	}
-//	printf("%u elementary schema", (unsigned)hdf_schema.size());
 
 	// generate higher-order schema for a fixed number of orders
 	// for now, 1% randomly chosen pairs of mutually exclusive elementary schema
@@ -174,7 +109,6 @@ void GA_hdf::hdf_generate(int len)	{
         list_start = list_end;
         list_end   = hdf_schema.size();
 	}
-//	printf(", %u total schema (%u positive, %u negative)\n", (unsigned)hdf_schema.size(), sch_pos+num_elementary, sch_neg);
 }
 
 //
@@ -185,7 +119,7 @@ void GA_hdf::randomize()	{
 	obj_sum   = 0;
 	obj_sumsq = 0;
 
-    // zoink all them bits
+    // zoink all them purrty bits
 	for(unsigned i = 0; i < nv; i++)	{
 		for(unsigned l = 0; l < hdf_len; l++)
 			pop[i]->b[l] = rng.genrand_real1() < 0.5 ? 0 : 1;
@@ -196,42 +130,6 @@ void GA_hdf::randomize()	{
 			obj_max = pop[i]->obj;
 	}
 }
-
-//
-// gives null strings to all nodes, except "num" randomly chosen ones
-// which get arbitrary schemas
-//
-void GA_hdf::initator_set(int num)  {
-	obj_max   = DBL_MIN;
-	obj_sum   = 0;
-	obj_sumsq = 0;
-
-	for(unsigned i = 0; i < nv; i++)    {
-	    memset(pop[i]->b, 0, hdf_len);
-	    pop[i]->obj = 0;
-	}
-
-	for(int i = 0; i < num; i++)   {
-	    int x;
-	    do {
-	        x = rng.genrand_real2() * nv;
-	    } while(pop[x]->obj > 1e-5);
-
-	    // give this guy all the schemas
-	    pop[x]->obj = 0;
-	    for(unsigned u = 0; u < hdf_schema.size(); u++) {
-	        const SCHEMA &s = *hdf_schema[u];
-	        for(unsigned l = 0; l < s.length; l++)
-                if(s.b[l] != 2)
-                    pop[x]->b[l+s.start] = s.b[l];
-            pop[x]->obj += s.val;
-	    }
-	    if(pop[x]->obj < 0)
-            pop[x]->obj = 0;
-        obj_max = pop[x]->obj;
-	}
-}
-
 
 //
 // HDF objective function
@@ -259,42 +157,63 @@ double GA_hdf::objective(GA_NODE *n)	{
 }
 
 //
-// GA operators on a set of edges -- crossover only for now
+// One-point crossover
+//
+GA_NODE *GA_hdf::crossover_1pt(GA_NODE *p1, GA_NODE *p2)    {
+	if(rng.genrand_real2()<0.5) {
+	    GA_NODE *x = p1;
+	    p1 = p2;
+	    p2 = x;
+	}
+	GA_NODE *child = new GA_NODE(hdf_len);
+
+	// one-point crossover for now:
+	unsigned split   = rng.genrand_real2() * hdf_len;
+	unsigned l;
+    for(l = 0; l < split; l++)
+		child->b[l] = p1->b[l];
+	for( ; l < hdf_len; l++)
+		child->b[l] = p2->b[l];
+
+	objective(child);
+    return child;
+}
+
+//
+// GA operators on a set of edges -- crossover only
 // if "directed" is true, then v1 is not replaced under any circumstances
 //
-void GA_hdf::interact(set<pair<int,int> > &edges, bool directed) {
-    map<int, GA_NODE*> tng;
-    GA_NODE *child;
+void GA_hdf::interact(const set<pair<int,int> > &edges, bool directed) {
+    map<int, GA_NODE*> tng;                 // the next generation of state vectors
 
     for(set<pair<int,int> >::iterator itr = edges.begin(); itr != edges.end(); itr++)   {
         int v1 = itr->first;
         int v2 = itr->second;
-        assert(v1 < (int)nv && v2 < (int)nv);
-        interact(v1, v2, child);
+        assert(v1 < (int)nv && v2 < (int)nv && v1 != v2 && pop[v1] && pop[v2]);
+        GA_NODE *child = crossover_1pt(pop[v1], pop[v2]);
 
+        // replace v2 in the population if child's objective score is higher
         if(child->obj > pop[v2]->obj)    {
-            if(tng.find(v2) == tng.end())
-                tng[v2] = new GA_NODE(*child);
-            else {
-                if(tng[v2]->obj < child->obj)   {
-                    delete tng[v2];
-                    tng[v2] = new GA_NODE(*child);
-                }
-            }
+            if(tng.find(v2) == tng.end())   {
+                tng[v2] = new GA_NODE(hdf_len);
+                *(tng[v2]) = *child;
+            } else
+                if(tng[v2]->obj < child->obj)
+                    *(tng[v2]) = *child;
         }
 
+        // only replace v1 if the network is undirected
         if(!directed)
             if(child->obj > pop[v1]->obj)    {
-                if(tng.find(v1) == tng.end())
-                    tng[v1] = new GA_NODE(*child);
-                else {
-                    if(tng[v1]->obj < child->obj)   {
-                        delete tng[v1];
-                        tng[v1] = new GA_NODE(*child);
-                    }
-                }
+                if(tng.find(v1) == tng.end())   {
+                    tng[v1] = new GA_NODE(hdf_len);
+                    *(tng[v1]) = *child;
+                } else
+                    if(tng[v1]->obj < child->obj)
+                        *(tng[v1]) = *child;
             }
 
+        // throw away child
         delete child;
     }
 
@@ -303,109 +222,63 @@ void GA_hdf::interact(set<pair<int,int> > &edges, bool directed) {
         *pop[itr->first] = *(itr->second);
         delete itr->second;
     }
-
 }
 
 //
-// returns the number of GA nodes with nonzero objective scores
+// Constructors, overloaded operators, and destructors
 //
-int GA_hdf::count_nonzero() {
-    int r = 0;
-
-    for(unsigned x = 0; x < nv; x++)
-        if(pop[x]->obj > 1e-5)
-            r++;
-    return r;
+GA_NODE::GA_NODE(unsigned length)  {
+    b            = new char[length];
+    len          = length;
+    improvements = 0;
+    contacts     = 0;
+    obj          = 0;
 }
-
-//
-// GA operators on two nodes -- crossover only for now
-// if "directed" is true, then v1 is not replaced under any circumstances
-//
-void GA_hdf::interact(unsigned v1, unsigned v2, bool directed)	{
-	assert(v1 < nv && v2 < nv);
-	GA_NODE *parent1    = pop[v1];
-	GA_NODE *parent2    = pop[v2];
-	GA_NODE *child1     = new GA_NODE(hdf_len);
-	GA_NODE *child2     = new GA_NODE(hdf_len);
-	GA_NODE *bestchild  = NULL;
-
-	// one-point crossover for now:
-	unsigned split   = rng.genrand_real2() * hdf_len;
-	unsigned l;
-    for(l = 0; l < split; l++)  {
-		child1->b[l] = parent1->b[l];
-		child2->b[l] = parent2->b[l];
+GA_NODE &GA_NODE::operator=(const GA_NODE&o)  {
+    if(this != &o)  {
+        if(len != o.len)    {
+            delete[] b;
+            b = new char[o.len];
+            len = o.len;
+        }
+        improvements = o.improvements;
+        contacts     = o.contacts;
+        obj          = o.obj;
+        memcpy(b, o.b, len);
     }
-	for( ; l < hdf_len; l++)    {
-		child1->b[l] = parent2->b[l];
-		child2->b[l] = parent1->b[l];
-	}
+    return *this;
+}
+GA_NODE::~GA_NODE() {
+    delete[] b;
+}
+SCHEMA::SCHEMA(unsigned len)    {
+    b = new char[len];
+    length = len;
+}
+SCHEMA::~SCHEMA()   {
+    delete[] b;
+}
+GA_hdf::GA_hdf(unsigned num_inds, int len)	{
+	// setup
+	nv = num_inds;
+	hdf_len = 0;
+	pop = new GA_NODE* [nv];
+	for(unsigned i = 0; i < nv; i++)
+        pop[i] = NULL;
+    obj_max = 0;
+    obj_sum = 0;
+    obj_sumsq = 0;
 
-    // evaluate
-	objective(child1);
-	objective(child2);
-	bestchild = child1->obj > child2->obj ? child1 : child2;
-
-    // the second parent is always replaced by the best child if
-    // the best child's fitness is greater
-    if(bestchild->obj > parent2->obj)   {
-        obj_sum      -= parent2->obj;
-        obj_sumsq    -= parent2->obj * parent2->obj;
-        *parent2 = *bestchild;
-        obj_sum      += parent2->obj;
-        obj_sumsq    += parent2->obj * parent2->obj;
-        parent2->improvements++;
-		parent2->contacts++;
-    }
-
-    // the first parent is replaced if the interaction is not directed
-    if(!directed && bestchild->obj > parent1->obj)   {
-        obj_sum      -= parent1->obj;
-        obj_sumsq    -= parent1->obj * parent1->obj;
-        *parent1 = *bestchild;
-        obj_sum      += parent1->obj;
-        obj_sumsq    += parent1->obj * parent1->obj;
-        parent1->improvements++;
-		parent1->contacts++;
-	}
-
-    // does the population maximum go up too?
-	if(parent1->obj > obj_max)
-		obj_max = parent1->obj;
-	if(parent2->obj > obj_max)
-		obj_max = parent2->obj;
-
-    assert(obj_sum/nv <= obj_max);
-	delete child1;
-	delete child2;
+	// generate the HDF fitness function
+	hdf_generate(len);
+}
+GA_hdf::~GA_hdf()	{
+    for(unsigned i = 0; i < nv; i++)
+        if(pop[i])
+            delete pop[i];
+	delete[] pop;
+	for(unsigned i = 0; i < hdf_schema.size(); i++)
+        delete hdf_schema[i];
+    hdf_schema.clear();
 }
 
-//
-// GA operators on two nodes -- crossover only for now
-// if "directed" is true, then v1 is not replaced under any circumstances
-//
-// creates a new GA_NODE object for child, sets the "child" pointer to
-// this new GA_NODE object (i.e., NEEDS TO BE DESTROYED)
-//
-void GA_hdf::interact(unsigned v1, unsigned v2, GA_NODE *&child)	{
-	assert(v1 < nv && v2 < nv);
-	GA_NODE *parent1    = pop[v1];
-	GA_NODE *parent2    = pop[v2];
-	if(rng.genrand_real2()<0.5) {
-	    GA_NODE *x = parent1;
-	    parent1 = parent2;
-	    parent2 = x;
-	}
-	child = new GA_NODE(hdf_len);
-
-	// one-point crossover for now:
-	unsigned split   = rng.genrand_real2() * hdf_len;
-	unsigned l;
-    for(l = 0; l < split; l++)
-		child->b[l] = parent1->b[l];
-	for( ; l < hdf_len; l++)
-		child->b[l] = parent2->b[l];
-
-	objective(child);
-}

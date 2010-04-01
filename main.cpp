@@ -19,6 +19,7 @@
  ***************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
+#include <cstring>
 #include "utils.h"
 #include "gadm.h"
 using namespace std;
@@ -30,57 +31,36 @@ STATE state;
 vector<TIMESTEP> dynet;
 
 int main(int argc, char *argv[])    {
+    // process command line
     if(argc < 4)    {
-        printf("Usage: gadm <input file> <U=undirected,D=directed> <operation>\n");
-        printf("  operation:\n");
-        printf("     1 = independent cascade experiment  (compare with #2)\n");
-        printf("     2 = GADM expected spread experiment (compare with #1)\n");
-        printf("     3 = GADM information accumulation experiment\n");
+        printf("Usage: gadm <input file> <U=undirected,D=directed> <output file>\n");
         return 0;
     }
-
-    int op = atoi(argv[3]);
-    state.quantize = QUANTIZE_NONE;
     state.directed = (argv[2][0]=='D'||argv[2][0]=='d');
     if(!(state.fpData = fopen(argv[1], "r")))   {
         fprintf(stderr, "Unable to open '%s'\n", argv[1]);
         return -1;
     }
+    strncpy(state.fpName, argv[1], 255);
+    if(!(state.fpOut = fopen(argv[3], "w+")))   {
+        fprintf(stderr, "Unable to create '%s'\n", argv[3]);
+        return -2;
+    }
 
-    // read in the whole .pair file
+    // read in the whole .pair file of interactions
     TIMESTEP ts;
     unsigned total_edges = 0;
     while(read_pair_timestep(ts))   {
         dynet.push_back(ts);
         total_edges += ts.edges.size();
     }
+    state.print();
+    fclose(state.fpData);
 
-    printf("===========================================\n");
-    printf("File       : %s\n", argv[1]);
-    printf("Directed   : %s\n", state.directed?"yes":"no");
-    printf("First epoch: %u\n", state.first_epoch);
-    printf("Nodes      : %d\n", state.nv);
-    printf("Edges(tot) : %d\n", total_edges);
-    printf("Timestamps : %d\n", (int)dynet.size());
-    printf("Mempeak    : %d MB\n", getMemoryPeak()/1024);
-    printf("===========================================\n");
+    // perform the information accumulation experiment
+    exp_gadm_info();
 
-    // perform the requested operation
-    switch(op)  {
-        case 1:
-            // independent cascade
-            exp_indcascade();
-            break;
-
-        case 2:
-            // GADM
-            exp_gadm();
-            break;
-
-        case 3:
-            exp_gadm_info();
-            break;
-    }
-
+    // clean up
+    fclose(state.fpOut);
     return 0;
 }

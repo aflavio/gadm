@@ -26,12 +26,10 @@
 #include <errno.h>
 #include "gadm.h"
 #include "tokenizer.h"
-#include "state.h"
 using namespace std;
 
 // global program state, in main.cpp
 extern STATE state;
-
 
 //
 // acceps a textual vertex label and returns the
@@ -89,7 +87,7 @@ int quantize(int timestep)    {
 //
 bool read_pair_timestep(TIMESTEP &ts)   {
     static Tokenizer tok;
-    static char buf[4096] = "";
+    static char buf[G_MAX_INPUT_LINE] = "";
     if(!state.fpData)
         return false;
     ts.edges.clear();
@@ -98,7 +96,7 @@ bool read_pair_timestep(TIMESTEP &ts)   {
     // do we have a left-over line from the last timestep, or do we need
     // to read another line from the file?
     if(!buf[0])
-        if(!fgets(buf, 4096, state.fpData)) {
+        if(!fgets(buf, G_MAX_INPUT_LINE, state.fpData)) {
             // no lines left in file -- we're done reading the whole file
             buf[0] = 0;
             return false;
@@ -108,21 +106,20 @@ bool read_pair_timestep(TIMESTEP &ts)   {
     ts.epoch = -1;
     do {
         tok.tokenize(buf);
-        if(tok.num_tokens() >= 1)   {
+        if(tok.num_tokens() >= 1)   {   // skip blank lines
             // get the timestep label
             char *endptr;
             errno = 0;
             int tsnum = strtod(tok.token(0), &endptr);
             if(errno || endptr == tok.token(0))   {
                 // encountered a non-numeric timestamp
-                fprintf(stderr, "Error: encountered a non-numeric timestep label '%s'\n", tok.token(0));
-                return false;
+                fprintf(stderr, "Error: encountered a non-numeric timestep label '%s' in input file.\n", tok.token(0));
+                exit(-5);
             }
             int quant = quantize(tsnum);
             if(ts.epoch == -1)
                 ts.epoch = quant;
-
-            if(ts.epoch != quant)
+            if(ts.epoch != quant)   // new timestep?
                 break;
 
             // add this observation to the timestep
@@ -134,7 +131,7 @@ bool read_pair_timestep(TIMESTEP &ts)   {
                     // have an edge
                     int vid2 = map_vertex(tok.token(2));
 
-                    // skip self-loops
+                    // skip self-edges, i.e., (v, v)
                     if(vid1 != vid2)    {
                         ts.vertices.insert(vid2);
 
@@ -152,12 +149,17 @@ bool read_pair_timestep(TIMESTEP &ts)   {
         }
 
         // read the next line
-        if(!fgets(buf, 4096, state.fpData)) {
+        if(!fgets(buf, G_MAX_INPUT_LINE, state.fpData)) {
             buf[0] = 0;
             break;
         }
     } while(1);
 
+    // update state
+    state.ne+= ts.edges.size();
+    state.nt++;
+
+    // sanity check
     assert(ts.edges.size() <= ts.vertices.size()*(ts.vertices.size()-1)/(state.directed?1:2) );
 
     return true;
