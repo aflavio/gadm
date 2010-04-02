@@ -115,7 +115,7 @@ void GA_hdf::hdf_generate(int len)	{
 // messes up all the bits in every node in the GA
 //
 void GA_hdf::randomize()	{
-	obj_max   = DBL_MIN;
+	obj_max   = 0;
 	obj_sum   = 0;
 	obj_sumsq = 0;
 
@@ -153,6 +153,8 @@ double GA_hdf::objective(GA_NODE *n)	{
 	}
 	if(n->obj < 0)
 		n->obj = 0;
+    if(n->obj > obj_max)
+        obj_max = n->obj;
 	return n->obj;
 }
 

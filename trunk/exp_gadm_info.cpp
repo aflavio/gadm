@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include "gadm.h"
 #include "ga.h"
+#include "converger.h"
 
 using namespace std;
 
@@ -41,56 +42,93 @@ extern vector<TIMESTEP> dynet;
 // the function below encompasses the entire GADM loop
 //
 void exp_gadm_info()   {
-    GA_hdf ga(state.nv);
-    ga.randomize();
+    // some vectors to store initial and final ANOs
+    vector<double> ano_initial;
+    vector<double> ano_final;
+    for(int i = 0; i < state.nv; i++) {
+        ano_initial.push_back(0);
+        ano_final.push_back(0);
+    }
 
-    // record initial fitness of all nodes
-    vector<double> initial_fitness;
-    for(unsigned x = 0; x < ga.num_nodes(); x++)
-        initial_fitness.push_back(ga.node(x)->obj);
-
-    // process the data
+    // maps to store some general node properties
     map<int,int> contacts;
     map<int,set<int> > indegree;
     map<int,set<int> > outdegree;
     map<int,int> first_seen;
 
-    for(unsigned T = 0; T < dynet.size(); T++)  {
-        TIMESTEP &ts = dynet[T];
-        ga.interact(ts.edges, state.directed);
+    // start the random trials
+    Converger conv(3, G_MAX_TRIALS, 0.05, 5);
+    for(int trial = 1; trial <= G_MAX_TRIALS; trial++)  {
+        GA_hdf ga(state.nv);
+        ga.randomize();
 
-        for(set<pair<int,int> >::iterator itr=ts.edges.begin(); itr!=ts.edges.end();itr++)  {
-            int v1 = itr->first;
-            int v2 = itr->second;
-            indegree[v2].insert(v1);
-            outdegree[v1].insert(v2);
-            contacts[v2]++;
-            if(!state.directed) {
-                contacts[v1]++;
-                indegree[v1].insert(v2);
-                outdegree[v2].insert(v1);
-            }
-            if(first_seen.find(v1)==first_seen.end())
-                first_seen[v1] = T;
-            if(first_seen.find(v2)==first_seen.end())
-                first_seen[v2] = T;
+        // record initial fitness of all nodes
+        double max = ga.pop_max();
+        for(unsigned x = 0; x < ga.num_nodes(); x++)    {
+            double old_val = ano_initial[x]/trial;
+            double this_round = max<1e-20 ? 1.0 : ga.node(x)->obj/max;
+            double pcnt = (((this_round+ano_initial[x])/trial) - old_val)/old_val;
+            if(old_val > 0)
+                conv.value(pcnt);
+            ano_initial[x] += this_round;
         }
+
+        // process the data
+        for(unsigned T = 0; T < dynet.size(); T++)  {
+            TIMESTEP &ts = dynet[T];
+            ga.interact(ts.edges, state.directed);
+
+            if(trial == 1)
+                for(set<pair<int,int> >::iterator itr=ts.edges.begin(); itr!=ts.edges.end();itr++)  {
+                    int v1 = itr->first;
+                    int v2 = itr->second;
+                    indegree[v2].insert(v1);
+                    outdegree[v1].insert(v2);
+                    contacts[v2]++;
+                    if(!state.directed) {
+                        contacts[v1]++;
+                        indegree[v1].insert(v2);
+                        outdegree[v2].insert(v1);
+                    }
+                    if(first_seen.find(v1)==first_seen.end())
+                        first_seen[v1] = T;
+                    if(first_seen.find(v2)==first_seen.end())
+                        first_seen[v2] = T;
+                }
+        }
+
+        // record final fitness of all nodes
+        assert(ga.pop_max() >= max);
+        max = ga.pop_max();
+        for(unsigned x = 0; x < ga.num_nodes(); x++)    {
+            double old_val = ano_final[x]/trial;
+            double this_round = max<1e-20 ? 1.0 : ga.node(x)->obj/max;
+            double pcnt = (((this_round+ano_final[x])/trial) - old_val)/old_val;
+            if(old_val > 0)
+                conv.value(pcnt);
+            ano_final[x] += this_round;
+        }
+
+        // output data to result file
+        rewind(state.fpOut);
+
+        // output header
+        state.print(state.fpOut);
+        fprintf(state.fpOut, "# Trials: %d\n", trial);
+        fprintf(state.fpOut, "id ano_initial ano_final indegree outdegree contacts firstseen label\n");
+
+        // output all data
+        for(unsigned x = 0; x < ga.num_nodes(); x++)
+            fprintf(state.fpOut, "%d %.4f %.4f %u %u %d %d \"%s\"\n",
+                    x, ano_initial[x]/trial, ano_final[x]/trial, (unsigned)indegree[x].size(),
+                    (unsigned)outdegree[x].size(), contacts[x], first_seen[x], state.vid_to_vertex[x].c_str());
+        fflush(state.fpOut);
+
+        // check convergence
+        printf("TRIAL %d: finished, conv test %f conv val %f\n", trial, conv.convtest(), conv.convvalue());
+        if(conv.converged())
+            break;
+        conv.next_iteration();
+
     }
-
-    // output header row for R
-    printf("id fit_initial fit_final indegree outdegree contacts firstseen label\n");
-
-    // output all data
-    for(unsigned x = 0; x < ga.num_nodes(); x++) {
-        unsigned id = indegree[x].size();
-        unsigned od = outdegree[x].size();
-        int cont = contacts[x];
-        int fs   = first_seen[x];
-        printf("%d %.2f %.2f %u %u %d %d \"%s\"\n", x, initial_fitness[x], ga.node(x)->obj, id, od, cont, fs, state.vid_to_vertex[x].c_str());
-
-        // sanity checks
-        assert(id <= (unsigned)cont);
-        assert(ga.node(x)->obj >= initial_fitness[x]);
-    }
-
 }

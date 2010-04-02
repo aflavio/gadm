@@ -1,6 +1,6 @@
 CC=g++
 CFLAGS=-O3 -fexpensive-optimizations -Wall -ansi -DLINUX -DNDEBUG
-SRCS=exp_gadm_info.cpp ga.cpp main.cpp mt19937ar.cpp pair_reader.cpp tokenizer.cpp utils.cpp
+SRCS=exp_gadm_info.cpp ga.cpp main.cpp mt19937ar.cpp pair_reader.cpp tokenizer.cpp utils.cpp converger.cpp
 OBJS=$(SRCS:.cpp=.o)
 
 all: gadm
