@@ -40,6 +40,8 @@ using namespace std;
 //
 // G_MAX_INPUT_LINE is the maximum length in bytes of a single line in the input file
 #define G_MAX_INPUT_LINE        (4096)
+// G_MAX_TRIALS maximum number of random trials to give up if ANO estimates have not converged
+#define G_MAX_TRIALS            (1000)
 
 
 //***************************************************************************
